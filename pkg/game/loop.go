@@ -4,6 +4,7 @@ import (
 	"log"
 	"math"
 	"runtime"
+	"time"
 
 	"github.com/veandco/go-sdl2/sdl"
 )
@@ -45,7 +46,6 @@ func (g *Game) Init() error {
 type Player struct {
 	X, Y             float64
 	XVelo, YVelo     float64
-	XAccel, YAccel   float64
 	XTarget, YTarget float64
 	Color            sdl.Color
 }
@@ -78,35 +78,37 @@ func (p *Player) HandleInput(input sdl.Event) {
 }
 
 func (p *Player) Update() {
-	p.XAccel += (p.XTarget - p.X) / 100
-	p.YAccel += (p.YTarget - p.Y) / 100
+	p.XVelo += (p.XTarget - p.X) / 100
+	p.YVelo += (p.YTarget - p.Y) / 100
 
-	if p.XAccel < 0 {
-		p.XAccel = math.Max(-25, p.XAccel)
+	if p.XVelo < 0 {
+		p.XVelo = math.Max(-25, p.XVelo)
 	} else {
-		p.XAccel = math.Min(25, p.XAccel)
+		p.XVelo = math.Min(25, p.XVelo)
 	}
 
-	if p.YAccel < 0 {
-		p.YAccel = math.Max(-25, p.YAccel)
+	if p.YVelo < 0 {
+		p.YVelo = math.Max(-25, p.YVelo)
 	} else {
-		p.YAccel = math.Min(25, p.YAccel)
+		p.YVelo = math.Min(25, p.YVelo)
 	}
 
-	p.X += p.XAccel
-	p.Y += p.YAccel
-	/*
-		p.XVelo = 0
-		p.YVelo = 0
-	*/
+	p.X += p.XVelo
+	p.Y += p.YVelo
 }
 
-func (game *Game) render(p *Player) {
-	rect := sdl.Rect{X: int32(p.X), Y: int32(p.Y), W: 50, H: 50}
+func (game *Game) render(p *Player, delta float64) {
+	vX, vY := p.XVelo+p.XVelo*delta, p.YVelo+p.YVelo*delta
+	// vX, vY := float64(0), float64(0)
+	x, y := p.X+vX, p.Y+vY
+
+	rect := sdl.Rect{X: int32(x), Y: int32(y), W: 50, H: 50}
 	r, g, b, a := uint8(p.Color.R), uint8(p.Color.G), uint8(p.Color.B), uint8(p.Color.A)
 	game.Renderer.SetDrawColor(r, g, b, a)
 	game.Renderer.FillRect(&rect)
 }
+
+const TimeStep int64 = 31250000 // 64 FPS
 
 // Run blocks while running the game.
 func (g *Game) Run() {
@@ -116,7 +118,16 @@ func (g *Game) Run() {
 
 	player := NewPlayer()
 
+	start := time.Now()
+	ticks := int64(0)
+	lag := int64(0)
+
 	for !quit {
+		nowTicks := time.Now().Sub(start).Nanoseconds()
+		lag += (nowTicks - ticks)
+		ticks = nowTicks
+
+		fps()
 		for {
 			e := sdl.PollEvent()
 			if e == nil {
@@ -127,7 +138,11 @@ func (g *Game) Run() {
 			}
 			player.HandleInput(e)
 		}
-		player.Update()
+
+		for lag > TimeStep {
+			player.Update()
+			lag -= TimeStep
+		}
 
 		if err := g.Renderer.SetDrawColorArray(200, 140, 200); err != nil {
 			panic(err)
@@ -137,7 +152,8 @@ func (g *Game) Run() {
 			panic(err)
 		}
 
-		g.render(player)
+		delta := float64(lag) / float64(TimeStep)
+		g.render(player, delta)
 
 		g.Renderer.Present()
 	}
@@ -155,4 +171,17 @@ func (g *Game) checkForQuit(input sdl.Event) bool {
 		return false
 	}
 	return false
+}
+
+var frames uint
+var last time.Time
+
+func fps() {
+	frames++
+	now := time.Now()
+	if now.Sub(last).Nanoseconds() > 1e9 {
+		log.Println("FPS:", frames)
+		frames = 0
+		last = now
+	}
 }
